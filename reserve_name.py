@@ -2,6 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
+import sys
 
 # Load .env file where your PYPI_API_TOKEN is stored
 load_dotenv()
@@ -63,7 +64,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 # Step 2: Build the package
 def build_package(base_dir, package_name):
     root = Path(base_dir) / package_name
-    subprocess.run([f"{Path().resolve()}/venv/bin/python", 'setup.py', 'sdist', 'bdist_wheel'], cwd=root)
+    subprocess.run([sys.executable, 'setup.py', 'sdist', 'bdist_wheel'], cwd=root)
 
 # Step 3: Upload only the .whl file to PyPI
 def upload_package(base_dir, package_name):
@@ -73,8 +74,42 @@ def upload_package(base_dir, package_name):
     # Install twine if not installed
     subprocess.run(["pip", "install", "twine"])
 
-    # Upload only the .whl file
-    subprocess.run(f"twine upload dist/*.whl {token_cmd}", cwd=root, shell=True)
+    # Upload only the .whl file with verbose output and error checking
+    result = subprocess.run(f"twine upload dist/*.whl {token_cmd}", cwd=root, shell=True)
+    
+    # Check if the upload was successful
+    if result.returncode != 0:
+        raise Exception(f"Failed to upload package {package_name} to PyPI")
+
+# Step 4: Create GitHub repository
+def create_github_repo(base_dir, package_name):
+    root = Path(base_dir) / package_name
+    
+    try:
+        print("Creating GitHub repository...")
+        
+        # Change to the package directory
+        os.chdir(root)
+        
+        # Initialize git
+        subprocess.run(["git", "init"], check=True)
+        
+        # Add all files
+        subprocess.run(["git", "add", "."], check=True)
+        
+        # Create initial commit
+        subprocess.run(["git", "commit", "-m", "initial commit"], check=True)
+        
+        # Create GitHub repo and push
+        subprocess.run(["gh", "repo", "create", package_name, "--public", "--source=.", "--push"], check=True)
+        
+        print(f"✅ GitHub repository created successfully: https://github.com/$(gh api user --jq .login)/{package_name}")
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error creating GitHub repository: {e}")
+        print("Make sure you have 'gh' installed and authenticated (run 'gh auth login')")
+    except Exception as e:
+        print(f"❌ Unexpected error creating GitHub repository: {e}")
 
 if __name__ == "__main__":
     package_name = input("Enter the package name you want to reserve: ")
@@ -88,13 +123,26 @@ if __name__ == "__main__":
     else:
         base_dir = input("Enter the base directory where you want to create the package (e.g., D:/MyPackages): ")
 
-    print("Creating package structure...")
-    create_package_structure(base_dir, package_name, package_description)
+    try:
+        print("Creating package structure...")
+        create_package_structure(base_dir, package_name, package_description)
 
-    print("Building the package...")
-    build_package(base_dir, package_name)
+        print("Building the package...")
+        build_package(base_dir, package_name)
 
-    print("Uploading the .whl package to PyPI...")
-    upload_package(base_dir, package_name)
+        print("Uploading the .whl package to PyPI...")
+        upload_package(base_dir, package_name)
 
-    print(f"Package {package_name} (.whl) with description '{package_description}' has been uploaded to PyPI!")
+        print(f"Package {package_name} (.whl) with description '{package_description}' has been successfully uploaded to PyPI!")
+        
+        # Ask if user wants to create GitHub repository
+        create_github = input("\nWould you like to create a GitHub repository for this package? (y/n): ")
+        
+        if create_github.lower() == 'y':
+            create_github_repo(base_dir, package_name)
+        else:
+            print("Skipping GitHub repository creation.")
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        print("Package upload failed.")
